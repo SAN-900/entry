@@ -1,8 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::{
-    associated_token::AssociatedToken,
-    token::{self, Mint, Token, TokenAccount, TransferChecked},
-};
+use anchor_spl::token::{self, Mint, Token, TokenAccount, TransferChecked};
 use mpl_bubblegum::{
     instructions::{FreezeV2CpiBuilder, MintV2CpiBuilder},
     types::{Creator, MetadataArgsV2, TokenStandard},
@@ -37,7 +34,7 @@ pub struct Purchase<'info> {
         constraint = event.active @ EntryError::EventInactive,
         constraint = event.gatekeeper == gatekeeper.key() @ EntryError::UnauthorizedGatekeeper
     )]
-    pub event: Account<'info, Event>,
+    pub event: Box<Account<'info, Event>>,
     #[account(
         init_if_needed,
         payer = buyer,
@@ -45,17 +42,17 @@ pub struct Purchase<'info> {
         seeds = [b"purchases", event.key().as_ref(), buyer.key().as_ref()],
         bump
     )]
-    pub purchase_counter: Account<'info, PurchaseCounter>,
+    pub purchase_counter: Box<Account<'info, PurchaseCounter>>,
     #[account(seeds = [CONFIG_SEED], bump = config.bump)]
-    pub config: Account<'info, Config>,
+    pub config: Box<Account<'info, Config>>,
     #[account(address = event.payment_mint, constraint = is_supported_usdc_mint(&payment_mint.key()) @ EntryError::InvalidPaymentMint, constraint = payment_mint.decimals == 6 @ EntryError::InvalidPaymentMint)]
-    pub payment_mint: Account<'info, Mint>,
-    #[account(mut, associated_token::mint = payment_mint, associated_token::authority = buyer, associated_token::token_program = token_program)]
-    pub buyer_usdc: Account<'info, TokenAccount>,
-    #[account(mut, associated_token::mint = payment_mint, associated_token::authority = event.organizer, associated_token::token_program = token_program)]
-    pub organizer_usdc: Account<'info, TokenAccount>,
-    #[account(mut, associated_token::mint = payment_mint, associated_token::authority = config.fee_vault, associated_token::token_program = token_program)]
-    pub fee_vault_usdc: Account<'info, TokenAccount>,
+    pub payment_mint: Box<Account<'info, Mint>>,
+    #[account(mut)]
+    pub buyer_usdc: Box<Account<'info, TokenAccount>>,
+    #[account(mut)]
+    pub organizer_usdc: Box<Account<'info, TokenAccount>>,
+    #[account(mut)]
+    pub fee_vault_usdc: Box<Account<'info, TokenAccount>>,
     /// CHECK: Bubblegum V2 tree config PDA; parsed and checked against the event before mint.
     #[account(mut, seeds = [event.merkle_tree.as_ref()], bump, seeds::program = bubblegum_program.key())]
     pub tree_config: UncheckedAccount<'info>,
@@ -65,9 +62,6 @@ pub struct Purchase<'info> {
     /// CHECK: The event's MPL Core collection.
     #[account(mut, address = event.collection)]
     pub collection: UncheckedAccount<'info>,
-    /// CHECK: Event PDA controls the tree and is the collection update and permanent plugin authority.
-    #[account(address = event.key())]
-    pub event_authority: UncheckedAccount<'info>,
     /// CHECK: Canonical Bubblegum V2 CPI signer PDA for MPL Core.
     #[account(address = MPL_CORE_CPI_SIGNER)]
     pub mpl_core_cpi_signer: UncheckedAccount<'info>,
@@ -84,7 +78,6 @@ pub struct Purchase<'info> {
     #[account(address = MPL_CORE_PROGRAM_ID)]
     pub mpl_core_program: UncheckedAccount<'info>,
     pub token_program: Program<'info, Token>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
 
@@ -96,6 +89,21 @@ pub fn handler<'info>(
         ctx.accounts.event.sold < ctx.accounts.event.supply,
         EntryError::SoldOut
     );
+    crate::instructions::buy_resale::validate_usdc_ata(
+        &ctx.accounts.buyer_usdc,
+        ctx.accounts.payment_mint.key(),
+        ctx.accounts.buyer.key(),
+    )?;
+    crate::instructions::buy_resale::validate_usdc_ata(
+        &ctx.accounts.organizer_usdc,
+        ctx.accounts.payment_mint.key(),
+        ctx.accounts.event.organizer,
+    )?;
+    crate::instructions::buy_resale::validate_usdc_ata(
+        &ctx.accounts.fee_vault_usdc,
+        ctx.accounts.payment_mint.key(),
+        ctx.accounts.config.fee_vault,
+    )?;
     let tree_config =
         mpl_bubblegum::accounts::TreeConfig::try_from(&ctx.accounts.tree_config.to_account_info())
             .map_err(|_| error!(EntryError::InvalidEventTree))?;
@@ -194,7 +202,7 @@ pub fn handler<'info>(
     let bubblegum_program = ctx.accounts.bubblegum_program.to_account_info();
     let tree_config_info = ctx.accounts.tree_config.to_account_info();
     let buyer = ctx.accounts.buyer.to_account_info();
-    let event_authority = ctx.accounts.event_authority.to_account_info();
+    let event_authority = ctx.accounts.event.to_account_info();
     let merkle_tree = ctx.accounts.merkle_tree.to_account_info();
     let collection = ctx.accounts.collection.to_account_info();
     let core_cpi_signer = ctx.accounts.mpl_core_cpi_signer.to_account_info();

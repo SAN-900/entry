@@ -78,13 +78,20 @@ fn checkins_account(event: Pubkey, supply: u32) -> (Pubkey, Account) {
 }
 
 fn program_test() -> ProgramTest {
-    ProgramTest::new(
-        "entry",
-        ENTRY_ID,
-        processor!(|program_id, accounts, instruction_data| {
-            entry::entry(program_id, accounts, instruction_data)
-        }),
-    )
+    ProgramTest::new("entry", ENTRY_ID, processor!(entrypoint))
+}
+
+fn entrypoint<'info>(
+    program_id: &Pubkey,
+    accounts: &[anchor_lang::solana_program::account_info::AccountInfo<'info>],
+    instruction_data: &[u8],
+) -> anchor_lang::solana_program::entrypoint::ProgramResult {
+    // Anchor's generated entrypoint ties the account-slice borrow to each
+    // AccountInfo lifetime, while ProgramTest's processor type leaves them
+    // independent. ProgramTest invokes this synchronously, and Anchor does
+    // not retain account references after entry returns.
+    let accounts: &'info [_] = unsafe { core::mem::transmute(accounts) };
+    entry::entry(program_id, accounts, instruction_data)
 }
 
 async fn process_instruction(

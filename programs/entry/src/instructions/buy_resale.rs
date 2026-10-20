@@ -1,8 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::{
-    associated_token::AssociatedToken,
-    token::{self, Mint, Token, TokenAccount, TransferChecked},
-};
+use anchor_spl::token::{self, Mint, Token, TokenAccount, TransferChecked};
 
 use crate::{
     constants::*,
@@ -25,7 +22,7 @@ pub struct BuyResale<'info> {
     #[account(mut)]
     pub buyer: Signer<'info>,
     #[account(seeds = [EVENT_SEED, event.organizer.as_ref(), event.event_id.to_le_bytes().as_ref()], bump = event.bump, constraint = event.active @ EntryError::EventInactive)]
-    pub event: Account<'info, Event>,
+    pub event: Box<Account<'info, Event>>,
     #[account(
         mut,
         close = seller,
@@ -33,7 +30,7 @@ pub struct BuyResale<'info> {
         bump = listing.bump,
         has_one = event @ EntryError::InvalidAssetId
     )]
-    pub listing: Account<'info, Listing>,
+    pub listing: Box<Account<'info, Listing>>,
     /// CHECK: Listing PDA binds this key as seller; receives token proceeds and listing rent.
     #[account(mut, address = listing.seller)]
     pub seller: UncheckedAccount<'info>,
@@ -46,19 +43,19 @@ pub struct BuyResale<'info> {
         seeds = [b"purchases", event.key().as_ref(), buyer.key().as_ref()],
         bump
     )]
-    pub purchase_counter: Account<'info, PurchaseCounter>,
+    pub purchase_counter: Box<Account<'info, PurchaseCounter>>,
     #[account(seeds = [CONFIG_SEED], bump = config.bump)]
-    pub config: Account<'info, Config>,
+    pub config: Box<Account<'info, Config>>,
     #[account(address = event.payment_mint, constraint = is_supported_usdc_mint(&payment_mint.key()) @ EntryError::InvalidPaymentMint, constraint = payment_mint.decimals == 6 @ EntryError::InvalidPaymentMint)]
-    pub payment_mint: Account<'info, Mint>,
-    #[account(mut, associated_token::mint = payment_mint, associated_token::authority = buyer, associated_token::token_program = token_program)]
-    pub buyer_usdc: Account<'info, TokenAccount>,
-    #[account(mut, associated_token::mint = payment_mint, associated_token::authority = seller, associated_token::token_program = token_program)]
-    pub seller_usdc: Account<'info, TokenAccount>,
-    #[account(mut, associated_token::mint = payment_mint, associated_token::authority = event.organizer, associated_token::token_program = token_program)]
-    pub organizer_usdc: Account<'info, TokenAccount>,
-    #[account(mut, associated_token::mint = payment_mint, associated_token::authority = config.fee_vault, associated_token::token_program = token_program)]
-    pub fee_vault_usdc: Account<'info, TokenAccount>,
+    pub payment_mint: Box<Account<'info, Mint>>,
+    #[account(mut)]
+    pub buyer_usdc: Box<Account<'info, TokenAccount>>,
+    #[account(mut)]
+    pub seller_usdc: Box<Account<'info, TokenAccount>>,
+    #[account(mut)]
+    pub organizer_usdc: Box<Account<'info, TokenAccount>>,
+    #[account(mut)]
+    pub fee_vault_usdc: Box<Account<'info, TokenAccount>>,
     /// CHECK: Bubblegum V2 tree config PDA.
     #[account(seeds = [event.merkle_tree.as_ref()], bump, seeds::program = bubblegum_program.key())]
     pub tree_config: UncheckedAccount<'info>,
@@ -68,12 +65,6 @@ pub struct BuyResale<'info> {
     /// CHECK: Configured MPL Core collection.
     #[account(address = event.collection)]
     pub collection: UncheckedAccount<'info>,
-    /// CHECK: Must be the current owner represented in the Bubblegum leaf proof.
-    #[account(address = listing.seller)]
-    pub leaf_owner: UncheckedAccount<'info>,
-    /// CHECK: Event PDA is tree delegate and both permanent collection delegates.
-    #[account(address = event.key())]
-    pub event_authority: UncheckedAccount<'info>,
     /// CHECK: Fixed Bubblegum V2 program.
     #[account(address = mpl_bubblegum::ID)]
     pub bubblegum_program: UncheckedAccount<'info>,
@@ -87,7 +78,6 @@ pub struct BuyResale<'info> {
     #[account(address = MPL_CORE_PROGRAM_ID)]
     pub mpl_core_program: UncheckedAccount<'info>,
     pub token_program: Program<'info, Token>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
 
@@ -99,6 +89,26 @@ pub fn handler<'info>(
         ctx.accounts.buyer.key() != ctx.accounts.listing.seller,
         EntryError::SelfPurchase
     );
+    validate_usdc_ata(
+        &ctx.accounts.buyer_usdc,
+        ctx.accounts.payment_mint.key(),
+        ctx.accounts.buyer.key(),
+    )?;
+    validate_usdc_ata(
+        &ctx.accounts.seller_usdc,
+        ctx.accounts.payment_mint.key(),
+        ctx.accounts.seller.key(),
+    )?;
+    validate_usdc_ata(
+        &ctx.accounts.organizer_usdc,
+        ctx.accounts.payment_mint.key(),
+        ctx.accounts.event.organizer,
+    )?;
+    validate_usdc_ata(
+        &ctx.accounts.fee_vault_usdc,
+        ctx.accounts.payment_mint.key(),
+        ctx.accounts.config.fee_vault,
+    )?;
     require!(
         ctx.accounts.listing.leaf_nonce < u64::from(ctx.accounts.event.sold),
         EntryError::TicketIdOutOfRange
@@ -210,9 +220,9 @@ pub fn handler<'info>(
         &ctx.accounts.bubblegum_program.to_account_info(),
         &ctx.accounts.tree_config.to_account_info(),
         &ctx.accounts.buyer.to_account_info(),
-        &ctx.accounts.leaf_owner.to_account_info(),
+        &ctx.accounts.seller.to_account_info(),
         &ctx.accounts.buyer.to_account_info(),
-        &ctx.accounts.event_authority.to_account_info(),
+        &ctx.accounts.event.to_account_info(),
         &ctx.accounts.merkle_tree.to_account_info(),
         &ctx.accounts.collection.to_account_info(),
         &ctx.accounts.log_wrapper.to_account_info(),
@@ -254,4 +264,20 @@ fn transfer_checked<'info>(
         amount,
         mint.decimals,
     )
+}
+
+pub(crate) fn validate_usdc_ata(
+    account: &Account<TokenAccount>,
+    mint: Pubkey,
+    authority: Pubkey,
+) -> Result<()> {
+    let expected = anchor_spl::associated_token::get_associated_token_address_with_program_id(
+        &authority,
+        &mint,
+        &anchor_spl::token::ID,
+    );
+    require_keys_eq!(account.key(), expected, EntryError::InvalidPaymentMint);
+    require_keys_eq!(account.mint, mint, EntryError::InvalidPaymentMint);
+    require_keys_eq!(account.owner, authority, EntryError::InvalidPaymentMint);
+    Ok(())
 }
