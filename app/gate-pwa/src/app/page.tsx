@@ -1,0 +1,1 @@
+export default function Home(){return <main><p className="muted">ENTRY · GATE MODE</p><h1>Verify. Admit. Prevent reuse.</h1><p className="muted">The first production-safe demo should use online redemption so two scanners cannot independently accept the same ticket.</p><button disabled>Scanner integration pending</button></main>}

@@ -1,0 +1,31 @@
+[package]
+name = "entry"
+version = "0.1.0"
+description = "ENTRY fair ticketing program"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "entry"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+
+[dependencies]
+anchor-lang = { version = "0.32.2", features = ["init-if-needed"] }
+anchor-spl = { version = "=0.32.2", features = ["associated_token", "token"] }
+bytemuck = { version = "=1.25.0", features = ["derive"] }
+mpl-bubblegum = "=2.1.1"
+
+[dev-dependencies]
+solana-program-test = "=2.3.4"
+solana-sdk = "=2.3.1"
+tokio = { version = "1.45.1", features = ["macros", "rt-multi-thread"] }
+
+[package.metadata.solana]
+tools-version = "v1.52"

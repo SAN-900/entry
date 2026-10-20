@@ -1,0 +1,3 @@
+export const BPS_DENOMINATOR = 10_000n;
+export const DEFAULT_RESALE_CAP_BPS = 11_000;
+export const DEFAULT_PLATFORM_FEE_BPS = 150;
