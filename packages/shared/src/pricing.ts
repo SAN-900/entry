@@ -1,4 +1,4 @@
-import { BPS_DENOMINATOR } from './constants.js';
+import { BPS_DENOMINATOR } from './constants';
 
 export function maxResalePrice(facePriceBaseUnits: bigint, capBps: number): bigint {
   if (facePriceBaseUnits <= 0n) throw new Error('face price must be positive');

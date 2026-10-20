@@ -40,8 +40,20 @@ pnpm idl
 pnpm dev:organizer
 pnpm dev:wallet
 pnpm dev:gate
+pnpm dev:clients
 pnpm dev:blinks
 ```
+
+The role-specific client pages run on separate local ports:
+
+- Organizer: http://localhost:3001
+- Wallet: http://localhost:3002
+- Gate: http://localhost:3003
+
+Run one role with its individual command, or start all three with
+`pnpm dev:clients`. These are preview interfaces; wallet connection, event
+creation, ticket lookup and checkout, and camera scanning and redemption are
+not yet integrated.
 
 Anchor commands depend on your local Anchor/Solana installation:
 

@@ -46,9 +46,18 @@ tracked separately in [architecture.md](architecture.md).
 - Core collection plugin parsing is unit-tested. An ignored ProgramTest loads
   ENTRY and the real SPL Account Compression SBF program and verifies that
   `create_event` initializes a depth-14, buffer-64 registry tree with the Event
-  PDA authority at a 400,000 CU transaction limit. Client builders must set a
-  compute budget for event creation. Run `scripts/test-registry-cpi.sh` to build
-  both SBF artifacts in a temporary directory and execute this test.
+  PDA authority at a 400,000 CU transaction limit. Another ignored ProgramTest
+  runs purchase and resale with the real SPL Token and compression programs
+  and a mock Bubblegum processor that accepts only the `mint_v2`, `freeze_v2`,
+  `thaw_v2`, and `transfer_v2` discriminators. It proves invalid registry
+  proof failure rolls back USDC; successful purchase and resale split USDC
+  exactly, close the listing, and update the real registry tree. It rejects a
+  150%-of-face ask at listing time and again at settlement when given an
+  artificially over-cap listing, without moving USDC or closing the listing.
+  This does not validate Bubblegum leaf transitions. Client builders
+  must set a compute budget for event creation. Run
+  `scripts/test-registry-cpi.sh` to build both SBF artifacts in a temporary
+  directory and execute these tests.
 - The purchase/resale account layouts include SBF stack-frame mitigations,
   and the Anchor IDL has been regenerated from those layouts. Canonical USDC
   ATA checks run in the handlers, so client builders must derive/pass those
@@ -60,33 +69,45 @@ tracked separately in [architecture.md](architecture.md).
 - The real SPL compression program's initialize and leaf-replacement
   instructions are tested, including stale/replayed leaf-update rejection and
   unchanged tree state after failure. `create_event` invokes real initialization
-  from ENTRY, while leaf replacement is currently tested directly against SPL.
-  ENTRY's `replace_owner_leaf` CPI wrapper and its same-transaction use with
-  purchase/resale still need integration coverage. Registry tree
+  from ENTRY, while direct leaf replacement is also tested directly against
+  SPL. ENTRY's `replace_owner_leaf` wrapper is exercised during purchase and
+  resale against the real compression processor. Registry tree
   allocation/proof building and client-side ownership proof verification
   remain unimplemented. Tiers,
   purchase receipts, identity nullifiers, checkpoints, gift/recovery,
   escrow/refunds, and offline conflict reconciliation are also not implemented.
 - Collection plugin presence and authority are validated, but that does not
-  prove the full raw-transfer policy on-chain. Bubblegum V2 mint/freeze and
-  thaw/transfer/freeze have not been exercised by validator integration tests.
-- No test proves USDC settlement rollback, seller ownership rejection,
-  stale-proof behavior, direct-transfer policy, or the complete
-  check-in/list/resale interaction. Check-in proof validation is tested, but
-  complete gate-service proof fetching and owner resolution are not.
-- `app/blinks-api` buy/resale POST routes return HTTP 501. No real Actions
-  transaction builder, gatekeeper verification/partial signer, v0/ALT
-  builder, compute-budget selection, or DAS proof client is wired up.
-- `app/gate-pwa` scanner, `app/wallet-web`, and `app/organizer-web` are shells;
-  no production wallet connection, ticket display, organizer provisioning,
-  checkout, or scanner redemption flow is implemented.
+  prove the full raw-transfer policy on-chain. Bubblegum V2 CPI state
+  transitions have not been exercised by validator integration tests.
+- The purchase/resale test proves rollback for an invalid purchase registry
+  proof and exact USDC settlement using the real SPL Token processor. Bubblegum
+  transition behavior and rollback after an actual Bubblegum failure remain
+  untested. Seller ownership rejection, stale Bubblegum proofs, direct-transfer
+  policy, and check-in/list/resale with real Bubblegum remain untested.
+  Check-in proof validation is tested, but gate-service proof fetching and
+  owner resolution are not.
+- `app/blinks-api` exposes Actions metadata and validates/proxies buy and resale
+  requests to a configured transaction-builder service. That trusted service
+  is not implemented here; gatekeeper verification/partial signing, v0/ALT
+  construction, compute-budget selection, and DAS proof fetching are absent.
+- `app/wallet-web` connects a wallet and can review/simulate/submit a prepared
+  transaction, but depends on the missing builder and ticket lookup service.
+- `app/gate-pwa` can scan fresh QR codes, queue pending scans locally, and
+  prepare a wallet-confirmed check-in through a configured service. The
+  `ENTRY_CHECKIN_SERVICE_URL` adapter only validates and proxies; proof
+  resolution and the transaction service are absent. Offline scans do not
+  grant admission.
+- `app/organizer-web` remains a shell: wallet connection, tree/collection
+  provisioning, event creation, and event management are not wired up.
 - `scripts/create-tree.ts` and `scripts/seed-demo-event.ts` throw stub errors.
   There is no verified tree/Core collection provisioning workflow, indexer,
   proof service, identity service, or production RPC configuration.
 - The default ProgramTest suite does not exercise Bubblegum or payment CPI
-  integrations. The separate ignored CPI tests cover registry setup and a
-  direct SPL leaf replacement, not the complete purchase/resale path. The
-  current tests are useful but are not a protocol security suite or audit.
+  integrations. The separate ignored CPI tests cover real registry setup,
+  direct leaf replacement, and purchase/resale payment and registry updates
+  with a mock Bubblegum processor. Bubblegum's actual state transitions remain
+  outside runtime coverage. The current tests are useful but are not a protocol
+  security suite or audit.
 
 ## Recommended implementation order
 
@@ -121,10 +142,10 @@ tracked separately in [architecture.md](architecture.md).
 
 ## Client/deployment readiness
 
-Not ready for deployment or client use. Collection validation and SPL registry
-tree initialization and replacement have local coverage, but ENTRY's registry
-replacement wrapper and all Bubblegum/payment flows still need tests against
-their real processors. After those pass, bring the final IDL into sync before
-wiring client transaction builders.
+Not ready for deployment or client use. Collection validation, ENTRY's
+registry replacement wrapper, and SPL Token purchase/resale settlement have
+local coverage. Bubblegum CPI behavior and rollback after Bubblegum failure
+still need tests against the real Bubblegum program. Purchase, resale, and gate
+client flows are also incomplete.
 Deployment, live-chain provisioning, and secret configuration remain separate
 operator actions.

@@ -9,6 +9,7 @@
     "dev:organizer": "pnpm --filter @entry/organizer-web dev",
     "dev:wallet": "pnpm --filter @entry/wallet-web dev",
     "dev:gate": "pnpm --filter @entry/gate-pwa dev",
+    "dev:clients": "pnpm --parallel --filter @entry/organizer-web --filter @entry/wallet-web --filter @entry/gate-pwa run dev",
     "dev:blinks": "pnpm --filter @entry/blinks-api dev"
   },
   "devDependencies": { "typescript": "^5.8.3", "vitest": "^3.2.4" }

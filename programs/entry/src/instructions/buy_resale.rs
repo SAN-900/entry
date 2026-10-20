@@ -57,7 +57,7 @@ pub struct BuyResale<'info> {
     #[account(mut)]
     pub fee_vault_usdc: Box<Account<'info, TokenAccount>>,
     /// CHECK: Bubblegum V2 tree config PDA.
-    #[account(seeds = [event.merkle_tree.as_ref()], bump, seeds::program = bubblegum_program.key())]
+    #[account(mut, seeds = [event.merkle_tree.as_ref()], bump, seeds::program = bubblegum_program.key())]
     pub tree_config: UncheckedAccount<'info>,
     /// CHECK: Configured event Merkle tree.
     #[account(mut, address = event.merkle_tree)]

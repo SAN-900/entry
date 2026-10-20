@@ -193,6 +193,7 @@ export type Entry = {
         },
         {
           "name": "treeConfig",
+          "writable": true,
           "pda": {
             "seeds": [
               {
