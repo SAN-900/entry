@@ -27,6 +27,7 @@
         },
         {
           "name": "event",
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -206,6 +207,10 @@
         },
         {
           "name": "collection"
+        },
+        {
+          "name": "registry_tree",
+          "writable": true
         },
         {
           "name": "bubblegum_program",
@@ -402,9 +407,13 @@
       ],
       "args": [
         {
-          "name": "nonces",
+          "name": "tickets",
           "type": {
-            "vec": "u64"
+            "vec": {
+              "defined": {
+                "name": "CheckInTicket"
+              }
+            }
           }
         }
       ]
@@ -482,6 +491,9 @@
           "name": "merkle_tree"
         },
         {
+          "name": "registry_tree"
+        },
+        {
           "name": "tree_config",
           "pda": {
             "seeds": [
@@ -506,6 +518,14 @@
         {
           "name": "mpl_core_program",
           "address": "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"
+        },
+        {
+          "name": "compression_program",
+          "address": "cmtDvXumGCrqC1Age74AVPhSRVXJMd8PJS91L8KbNCK"
+        },
+        {
+          "name": "log_wrapper",
+          "address": "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV"
         },
         {
           "name": "system_program",
@@ -839,6 +859,10 @@
           "writable": true
         },
         {
+          "name": "registry_tree",
+          "writable": true
+        },
+        {
           "name": "mpl_core_cpi_signer",
           "address": "CbNY3JiXdXNE9tPNEk1aRZVEkWdj2v7kfJLNQwZZgpXk"
         },
@@ -1082,6 +1106,19 @@
         13,
         71
       ]
+    },
+    {
+      "name": "TicketResold",
+      "discriminator": [
+        123,
+        117,
+        228,
+        225,
+        190,
+        75,
+        239,
+        229
+      ]
     }
   ],
   "errors": [
@@ -1244,9 +1281,35 @@
       "code": 6031,
       "name": "InvalidMetadata",
       "msg": "Metadata field exceeds the supported size"
+    },
+    {
+      "code": 6032,
+      "name": "InvalidRegistryProof",
+      "msg": "Ownership registry tree or proof is invalid"
+    },
+    {
+      "code": 6033,
+      "name": "InvalidRegistryTree",
+      "msg": "Ownership registry tree must be distinct from the ticket tree"
     }
   ],
   "types": [
+    {
+      "name": "CheckInTicket",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
     {
       "name": "BuyResaleArgs",
       "type": {
@@ -1349,6 +1412,14 @@
             "type": "pubkey"
           },
           {
+            "name": "registry_tree",
+            "type": "pubkey"
+          },
+          {
+            "name": "registry_depth",
+            "type": "u8"
+          },
+          {
             "name": "collection",
             "type": "pubkey"
           },
@@ -1427,6 +1498,30 @@
           {
             "name": "merkle_tree",
             "type": "pubkey"
+          },
+          {
+            "name": "registry_tree",
+            "docs": [
+              "ENTRY controlled compressed ownership registry. This root is the gate's owner of record."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "registry_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "registry_depth",
+            "type": "u8"
+          },
+          {
+            "name": "registry_seq",
+            "type": "u64"
           },
           {
             "name": "collection",
@@ -1649,6 +1744,60 @@
           },
           {
             "name": "fee",
+            "type": "u64"
+          },
+          {
+            "name": "registry_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "registry_seq",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TicketResold",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "event",
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "ask_price",
+            "type": "u64"
+          },
+          {
+            "name": "registry_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "registry_seq",
             "type": "u64"
           }
         ]

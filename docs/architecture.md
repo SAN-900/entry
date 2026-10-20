@@ -20,9 +20,16 @@ also commits the matching registry update. Freezing remains a useful extra
 restriction, but is not the sole admission security boundary until the exact
 Bubblegum V2 and MPL Core plugin behavior is proven on a validator.
 
-The registry tree and its proof/update flow do not exist in the current
-program. Until they do, describe the present system as a prototype with
-unverified freeze enforcement, not as preventing every off-program transfer.
+The registry tree and its proof/update flow now exist in source. A reproducible
+ProgramTest loads the real SPL Account Compression SBF to verify tree
+initialization from `create_event`, direct leaf replacement, and rejection of
+a stale/replayed leaf update. ENTRY's own leaf-replacement CPI wrapper and its
+atomic use with purchase/resale are not yet runtime-tested. Check-in currently
+uses the single-use bitmap, gate-authority signature, and an owner-of-record
+proof for each ticket. The client also does not yet build ownership proofs.
+Describe the present system as a prototype with unverified Bubblegum freeze
+enforcement and unverified end-to-end registry behavior, not as preventing
+every off-program transfer.
 
 ### Two ticket modes
 
@@ -73,16 +80,28 @@ Keep ticketing rules in ENTRY rather than forking those protocols.
 | Account | Seeds | Current role |
 | --- | --- | --- |
 | `Config` | `["config"]` | Admin, fee vault, fee basis points. |
-| `Event` | `["event", organizer, event_id]` | Event authority, gates, mint/tree/collection, face price, supply, wallet limit, resale cap, royalty, active/sold state. |
+| `Event` | `["event", organizer, event_id]` | Event authority, gates, ticket and registry trees, registry root/sequence, collection, face price, supply, wallet limit, resale cap, royalty, active/sold state. |
 | `CheckIns` | `["checkins", event]` | Zero-copy bitmap indexed by Bubblegum leaf nonce; current maximum is 80,000 tickets per event. |
 | `PurchaseCounter` | `["purchases", event, wallet]` | Program-enforced wallet purchase count. |
 | `Listing` | `["listing", event, asset_id, seller]` | Seller-bound resale ask; rent is returned when closed. |
 
+The registry is a second SPL ConcurrentMerkleTree. ENTRY initializes it with
+the Event PDA as authority and stores the current root and monotonic update
+sequence on Event. Registry leaf `nonce` is a domain-separated hash of the
+event, nonce, and owner-of-record. Purchase replaces the initially empty leaf;
+resale verifies the current seller proof and replaces it with the buyer leaf
+in the same transaction as payment and Bubblegum transfer. The tree uses a
+64-entry changelog buffer; supported depth is 14 for supplies up to 16,384
+and 20 for the current 80,000-ticket event limit. The registry tree account
+must be allocated by the client with the matching SPL account-compression
+size before `create_event`; ENTRY initializes it and signs as its authority.
+
 Asset IDs are derived from the configured Bubblegum tree and nonce. Listing
 does not prove ownership; settlement supplies the listing signer as the leaf
 owner and relies on Bubblegum to reject an invalid leaf/proof. A failed CPI
-should roll back earlier token transfers atomically; runtime integration
-coverage is still missing.
+should roll back earlier token transfers atomically; that behavior has not
+yet been verified across ENTRY, SPL Token, Bubblegum, and compression
+processors in one runtime test.
 
 ### Target account additions
 
@@ -91,7 +110,6 @@ These are target-design additions, not current accounts:
 | Account / data | Target role |
 | --- | --- |
 | `Tier` | Multiple price/supply/limit/sale-window configurations per event. The current single `Event` price and supply represent one implicit tier. |
-| Registry tree metadata and root/sequence on `Event` | Authoritative owner-of-record for admission and auditable ownership/checkpoint history. |
 | `MintReceipt` | Idempotency / replay receipt keyed by client order ID or a unique purchase nonce. Current nonce serialization and `sold` count protect tree ordering, but there is no receipt PDA. |
 | `Nullifier` | One-human-per-tier anti-sybil state, only after a ZK verification design is selected. |
 | `Checkpoint` | Signed, sequenced admitted-set roots for offline scanners, after scanner key management and replay/rollback handling are designed. |
@@ -111,26 +129,27 @@ MPL Core permanent delegate plugins. Organizer signatures configure the
 event; the gate authority signs check-in; the configured gatekeeper co-signs
 purchase. The program ID remains the value in `Anchor.toml` and `lib.rs`.
 
-`create_event` currently checks tree ownership, tree-config ownership,
-private mode, Event PDA delegation, zero prior mints, and declared capacity.
-It checks that the collection is owned by MPL Core, but does not decode and
-validate its `BubblegumV2`, permanent transfer delegate, or permanent freeze
-delegate plugins. It does not validate the compression tree buffer size.
-Provisioning/validation tooling and validator tests must establish those
-conditions before production use; a buffer size of 64 is a setup requirement
-in the current proposal, not an on-chain-enforced invariant.
+`create_event` checks Bubblegum tree and tree-config ownership, V2 tree
+version, private mode, Event PDA delegation, zero prior mints, declared
+capacity, depth, and 64-entry changelog buffer. It also decodes the MPL Core
+collection and requires the `BubblegumV2`, permanent transfer delegate, and
+permanent freeze delegate plugins with Event-controlled authority. These
+checks have source/unit coverage and a real-compression runtime test for event
+creation; they do not prove Bubblegum's later mint, freeze, thaw, or transfer
+behavior. The collection policy still needs a real Bubblegum/Core runtime test
+before production claims are safe.
 
 ### Current instruction flows
 
 | Instruction | Current behavior |
 | --- | --- |
 | `init_config` | Initializes fee config; initializer must be the program upgrade authority. |
-| `create_event` | Creates one event and its check-in bitmap after validating input and basic tree state. |
+| `create_event` | Creates one event and its check-in bitmap after validating tree version, ownership, privacy, capacity, depth/buffer and Core plugins; initializes the registry CMT through the real compression CPI. |
 | `set_active`, `set_gate_authority` | Organizer controls sales and rotates the check-in key. |
 | `purchase` | Buyer and gatekeeper sign; checks active state, supply, sequential tree nonce, wallet limit, USDC mint/ATAs; transfers USDC, calls Bubblegum V2 `mintV2`, then attempts `freezeV2` in the same atomic instruction. |
 | `list_for_resale` / `cancel_listing` | Seller-scoped listing; enforces face-price cap and rejects checked-in tickets; cancellation is seller-authorized. |
 | `buy_resale` | Rechecks cap, check-in and wallet limit; splits checked USDC; attempts thaw/transfer/freeze CPIs; closes listing. |
-| `check_in_batch` | Gate-authority signature; bounded batch, rejects unsold nonces, idempotently sets bitmap bits and emits events. |
+| `check_in_batch` | Gate-authority signature; bounded batch of owner/proof pairs, rejects unsold nonces and invalid registry owners, idempotently sets bitmap bits and emits events. |
 
 Primary and resale payments use the legacy SPL Token program and six-decimal
 USDC allowlisting. Purchase currently splits organizer proceeds and platform
@@ -139,9 +158,10 @@ Token-2022 tickets/add-ons are outside the current scope.
 
 ### Target instruction and state flow
 
-The next security milestone is an ENTRY-owned registry update that is atomic
-with primary sale and protocol resale. The gate validates the current
-registry owner/status (online initially; a signed cached proof later). Keep
+The registry update and current-root owner proof check-in are present in the
+source. The Account Compression CPI wrapper and its purchase/resale atomic use,
+tree allocation, and client proof generation still need runtime/integration
+coverage before the registry is considered production-proven. Keep
 the bitmap as the on-chain single-use check-in record unless measurements
 show checkpoint accounts should replace it; a future checkpoint must define
 scanner signatures, sequence/replay protection, stale-state windows, and
@@ -166,7 +186,7 @@ tests.
 - Atomic transaction failure must revert both payment and ticket/state
   changes. Prove this for successful and failing CPI paths with validator
   integration tests before launch.
-- Registry ownership, when implemented, becomes the admission authority;
+- Registry ownership is the intended admission authority;
   ticket NFT metadata or wallet display alone is never proof of admission.
 
 ## Client and service flows
@@ -199,10 +219,13 @@ out unless their platform behavior changes and is verified.
 
 The current scanner UI is a placeholder. Current on-chain check-in provides
 online, global single-use state when all scans submit to the same program
-state. Truly offline admission is future work: preload a registry/checkpoint
-root and proofs, use signed short-lived ticket challenges, protect device
-keys, journal scans locally, and design reconciliation for multiple
-disconnected scanners. An offline scan cannot prevent two isolated scanners
+state. `check_in_batch` takes `(nonce, owner)` for each scan and the matching
+registry sibling accounts in ticket order. Proofs must match the current
+`Event.registry_root`; the transaction supports at most four tickets at depth
+14 or three at depth 20. Truly offline admission is future work: preload a
+registry/checkpoint root and proofs, use signed short-lived ticket challenges,
+protect device keys, journal scans locally, and design reconciliation for
+multiple disconnected scanners. An offline scan cannot prevent two isolated scanners
 from accepting the same ticket before they sync. Do not claim a guaranteed
 400 ms offline flow until measured on target devices and tested under
 reconciliation/race conditions.
@@ -229,7 +252,7 @@ None of these production services is present in this repository today.
 
 | Phase | Deliverable | Main files | Required verification |
 | --- | --- | --- | --- |
-| 0 — buildable MVP core | Stable IDL/account layout, event/tree provisioning validation, registry design and CPI prototype, proof-tested purchase/resale. | `programs/entry/src/state/`, `instructions/create_event.rs`, `purchase.rs`, `buy_resale.rs`, `programs/entry/tests/`, `scripts/create-tree.ts`, `idls/` | Anchor/SBF build; validator tests for plugin/tree validation, mint/freeze, resale sequence, payment rollback, race/stale proofs, direct transfer and registry admission. |
+| 0 — buildable MVP core | Stable IDL/account layout, event/tree provisioning validation, registry CPI and proof-tested purchase/resale. | `programs/entry/src/state/`, `instructions/create_event.rs`, `purchase.rs`, `buy_resale.rs`, `programs/entry/tests/`, `scripts/create-tree.ts`, `idls/` | Anchor/SBF build; validator tests for plugin/tree validation, mint/freeze, registry initialization/update/admission, resale sequence, payment rollback, race/stale proofs and direct transfer. |
 | 1 — wallet and Actions | Real buy/resale transaction builders and secure gatekeeper co-sign service. | `app/blinks-api/`, new shared Solana client module, app manifests/lockfile, `idls/` | Typecheck; Actions protocol tests; transaction simulation; no key material in client bundle/logs; tests for malformed input, wrong event, missing signer, stale proof and cap. |
 | 2 — scanning | Online scan/redeem flow, then signed checkpoint/offline cache. | `app/gate-pwa/`, new scanner/storage modules, on-chain checkpoint instruction/state, `programs/entry/tests/` | Duplicate scan, replay, forged signature, stale root, cross-event, disconnected scanner conflict and resync tests. |
 | 3 — organizer and operations | Provisioning, indexer, proof cache, reconciliation, monitoring and export. | `app/organizer-web/`, `scripts/`, new service packages, deployment configuration | End-to-end devnet rehearsal, incident/pause runbook, reconciliation/idempotency tests. |

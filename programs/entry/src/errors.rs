@@ -66,4 +66,8 @@ pub enum EntryError {
     EventInactive,
     #[msg("Metadata field exceeds the supported size")]
     InvalidMetadata,
+    #[msg("Ownership registry tree or proof is invalid")]
+    InvalidRegistryProof,
+    #[msg("Ownership registry tree must be distinct from the ticket tree")]
+    InvalidRegistryTree,
 }

@@ -29,11 +29,29 @@ pub struct CheckInBatch<'info> {
     pub checkins: AccountLoader<'info, CheckIns>,
 }
 
-pub fn handler(ctx: Context<CheckInBatch>, nonces: Vec<u64>) -> Result<()> {
-    require!(!nonces.is_empty(), EntryError::InvalidSupply);
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct CheckInTicket {
+    pub nonce: u64,
+    pub owner: Pubkey,
+}
+
+pub fn handler(ctx: Context<CheckInBatch>, tickets: Vec<CheckInTicket>) -> Result<()> {
+    require!(!tickets.is_empty(), EntryError::InvalidSupply);
     require!(
-        nonces.len() <= MAX_CHECK_IN_BATCH,
+        tickets.len() <= MAX_CHECK_IN_BATCH,
         EntryError::CheckInBatchTooLarge
+    );
+    let depth = usize::from(ctx.accounts.event.registry_depth);
+    require!(depth == 14 || depth == 20, EntryError::InvalidRegistryProof);
+    let max_tickets_for_tree = (60 / depth).max(1);
+    require!(
+        tickets.len() <= max_tickets_for_tree
+            && ctx.remaining_accounts.len() == tickets.len() * depth
+            && ctx
+                .remaining_accounts
+                .iter()
+                .all(|account| !account.is_signer && !account.is_writable),
+        EntryError::InvalidRegistryProof
     );
     crate::state::checkin::validate(
         &ctx.accounts.checkins,
@@ -42,11 +60,22 @@ pub fn handler(ctx: Context<CheckInBatch>, nonces: Vec<u64>) -> Result<()> {
     )?;
     let now = Clock::get()?.unix_timestamp;
 
-    for nonce in nonces {
+    for (position, ticket) in tickets.into_iter().enumerate() {
+        let nonce = ticket.nonce;
         require!(
             nonce < u64::from(ctx.accounts.event.sold),
             EntryError::TicketIdOutOfRange
         );
+        let proof_start = position * depth;
+        let proof = &ctx.remaining_accounts[proof_start..proof_start + depth];
+        let owner_leaf =
+            crate::utils::registry::owner_leaf(ctx.accounts.event.key(), nonce, ticket.owner);
+        crate::utils::registry::root_from_proof(
+            ctx.accounts.event.registry_root,
+            nonce,
+            proof,
+            owner_leaf,
+        )?;
         let was_checked_in = crate::state::checkin::is_checked_in(&ctx.accounts.checkins, nonce)?;
         if !was_checked_in {
             crate::state::checkin::set_checked_in(&ctx.accounts.checkins, nonce)?;

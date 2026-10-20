@@ -62,6 +62,9 @@ pub struct Purchase<'info> {
     /// CHECK: The event's MPL Core collection.
     #[account(mut, address = event.collection)]
     pub collection: UncheckedAccount<'info>,
+    /// CHECK: ENTRY's compressed owner-of-record tree.
+    #[account(mut, address = event.registry_tree)]
+    pub registry_tree: UncheckedAccount<'info>,
     /// CHECK: Canonical Bubblegum V2 CPI signer PDA for MPL Core.
     #[account(address = MPL_CORE_CPI_SIGNER)]
     pub mpl_core_cpi_signer: UncheckedAccount<'info>,
@@ -111,6 +114,7 @@ pub fn handler<'info>(
         *ctx.accounts.tree_config.owner == mpl_bubblegum::ID
             && tree_config.tree_delegate == ctx.accounts.event.key()
             && !tree_config.is_public
+            && tree_config.version == mpl_bubblegum::types::Version::V2
             && tree_config.num_minted == u64::from(ctx.accounts.event.sold),
         EntryError::InvalidEventTree
     );
@@ -229,15 +233,44 @@ pub fn handler<'info>(
     mint.invoke_signed(&[event_seeds])?;
 
     require!(
-        ctx.remaining_accounts.len() <= 32
+        ctx.remaining_accounts.len() >= usize::from(ctx.accounts.event.registry_depth)
             && ctx
                 .remaining_accounts
                 .iter()
                 .all(|account| !account.is_signer && !account.is_writable),
         EntryError::InvalidMerkleProofAccounts
     );
-    let proof_accounts: Vec<_> = ctx
-        .remaining_accounts
+    let depth = usize::from(ctx.accounts.event.registry_depth);
+    let (registry_proof, freeze_proof) = ctx.remaining_accounts.split_at(depth);
+    require!(
+        freeze_proof.len() <= 32,
+        EntryError::InvalidMerkleProofAccounts
+    );
+    let registry_leaf = crate::utils::registry::owner_leaf(
+        ctx.accounts.event.key(),
+        nonce,
+        ctx.accounts.buyer.key(),
+    );
+    let registry_seq = ctx
+        .accounts
+        .event
+        .registry_seq
+        .checked_add(1)
+        .ok_or(EntryError::ArithmeticOverflow)?;
+    let new_registry_root = crate::utils::registry::replace_owner_leaf(
+        &ctx.accounts.compression_program.to_account_info(),
+        &ctx.accounts.registry_tree.to_account_info(),
+        &ctx.accounts.event.to_account_info(),
+        &ctx.accounts.log_wrapper.to_account_info(),
+        nonce,
+        crate::utils::registry::EMPTY_LEAF,
+        registry_leaf,
+        ctx.accounts.event.registry_root,
+        registry_proof,
+        event_seeds,
+    )?;
+
+    let proof_accounts: Vec<_> = ctx.remaining_accounts[depth..]
         .iter()
         .map(|account| (account, false, false))
         .collect();
@@ -263,6 +296,8 @@ pub fn handler<'info>(
         .add_remaining_accounts(&proof_accounts)
         .invoke_signed(&[event_seeds])?;
 
+    ctx.accounts.event.registry_root = new_registry_root;
+    ctx.accounts.event.registry_seq = registry_seq;
     counter.count = counter
         .count
         .checked_add(1)
@@ -280,6 +315,8 @@ pub fn handler<'info>(
         asset_id: mpl_bubblegum::utils::get_asset_id(&ctx.accounts.event.merkle_tree, nonce),
         price: amount,
         fee,
+        registry_root: ctx.accounts.event.registry_root,
+        registry_seq: ctx.accounts.event.registry_seq,
     });
     Ok(())
 }
@@ -292,6 +329,8 @@ pub struct TicketPurchased {
     pub asset_id: Pubkey,
     pub price: u64,
     pub fee: u64,
+    pub registry_root: [u8; 32],
+    pub registry_seq: u64,
 }
 
 fn transfer_checked<'info>(

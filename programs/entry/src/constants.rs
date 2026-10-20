@@ -6,7 +6,9 @@ pub const LISTING_SEED: &[u8] = b"listing";
 pub const CHECKIN_SEED: &[u8] = b"checkins";
 pub const MAX_PLATFORM_FEE_BPS: u16 = 500;
 pub const MAX_ROYALTY_BPS: u16 = 2_000;
-pub const MAX_CHECK_IN_BATCH: usize = 64;
+// Each ticket needs one registry proof account per tree level. Keep the
+// maximum compatible with Solana's 64-account transaction limit at depth 14.
+pub const MAX_CHECK_IN_BATCH: usize = 4;
 pub const BPS_DENOMINATOR: u128 = 10_000;
 pub const DEFAULT_RESALE_CAP_BPS: u16 = 11_000;
 pub const ACCOUNT_COMPRESSION_PROGRAM_ID: Pubkey =

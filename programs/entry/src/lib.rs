@@ -30,8 +30,11 @@ pub mod entry {
         instructions::cancel_listing::handler(ctx)
     }
 
-    pub fn check_in_batch(ctx: Context<CheckInBatch>, nonces: Vec<u64>) -> Result<()> {
-        instructions::check_in::handler(ctx, nonces)
+    pub fn check_in_batch(
+        ctx: Context<CheckInBatch>,
+        tickets: Vec<instructions::check_in::CheckInTicket>,
+    ) -> Result<()> {
+        instructions::check_in::handler(ctx, tickets)
     }
 
     pub fn purchase<'info>(

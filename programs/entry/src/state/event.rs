@@ -9,6 +9,11 @@ pub struct Event {
     pub gatekeeper: Pubkey,
     pub payment_mint: Pubkey,
     pub merkle_tree: Pubkey,
+    /// ENTRY controlled compressed ownership registry. This root is the gate's owner of record.
+    pub registry_tree: Pubkey,
+    pub registry_root: [u8; 32],
+    pub registry_depth: u8,
+    pub registry_seq: u64,
     pub collection: Pubkey,
     pub price: u64,
     pub supply: u32,

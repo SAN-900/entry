@@ -103,7 +103,10 @@ mod tests {
 
     #[test]
     fn fifty_thousand_tickets_fit_in_one_bitmap_account() {
-        assert_eq!(CheckIns::account_space(50_000), CheckIns::HEADER_SIZE + 6_250);
+        assert_eq!(
+            CheckIns::account_space(50_000),
+            CheckIns::HEADER_SIZE + 6_250
+        );
         assert!(CheckIns::account_space(50_000) < 7_000);
     }
 }

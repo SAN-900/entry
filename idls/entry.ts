@@ -33,6 +33,7 @@ export type Entry = {
         },
         {
           "name": "event",
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -212,6 +213,10 @@ export type Entry = {
         },
         {
           "name": "collection"
+        },
+        {
+          "name": "registryTree",
+          "writable": true
         },
         {
           "name": "bubblegumProgram",
@@ -408,9 +413,13 @@ export type Entry = {
       ],
       "args": [
         {
-          "name": "nonces",
+          "name": "tickets",
           "type": {
-            "vec": "u64"
+            "vec": {
+              "defined": {
+                "name": "checkInTicket"
+              }
+            }
           }
         }
       ]
@@ -488,6 +497,9 @@ export type Entry = {
           "name": "merkleTree"
         },
         {
+          "name": "registryTree"
+        },
+        {
           "name": "treeConfig",
           "pda": {
             "seeds": [
@@ -512,6 +524,14 @@ export type Entry = {
         {
           "name": "mplCoreProgram",
           "address": "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"
+        },
+        {
+          "name": "compressionProgram",
+          "address": "cmtDvXumGCrqC1Age74AVPhSRVXJMd8PJS91L8KbNCK"
+        },
+        {
+          "name": "logWrapper",
+          "address": "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV"
         },
         {
           "name": "systemProgram",
@@ -845,6 +865,10 @@ export type Entry = {
           "writable": true
         },
         {
+          "name": "registryTree",
+          "writable": true
+        },
+        {
           "name": "mplCoreCpiSigner",
           "address": "CbNY3JiXdXNE9tPNEk1aRZVEkWdj2v7kfJLNQwZZgpXk"
         },
@@ -1088,6 +1112,19 @@ export type Entry = {
         13,
         71
       ]
+    },
+    {
+      "name": "ticketResold",
+      "discriminator": [
+        123,
+        117,
+        228,
+        225,
+        190,
+        75,
+        239,
+        229
+      ]
     }
   ],
   "errors": [
@@ -1250,9 +1287,35 @@ export type Entry = {
       "code": 6031,
       "name": "invalidMetadata",
       "msg": "Metadata field exceeds the supported size"
+    },
+    {
+      "code": 6032,
+      "name": "invalidRegistryProof",
+      "msg": "Ownership registry tree or proof is invalid"
+    },
+    {
+      "code": 6033,
+      "name": "invalidRegistryTree",
+      "msg": "Ownership registry tree must be distinct from the ticket tree"
     }
   ],
   "types": [
+    {
+      "name": "checkInTicket",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
     {
       "name": "buyResaleArgs",
       "type": {
@@ -1355,6 +1418,14 @@ export type Entry = {
             "type": "pubkey"
           },
           {
+            "name": "registryTree",
+            "type": "pubkey"
+          },
+          {
+            "name": "registryDepth",
+            "type": "u8"
+          },
+          {
             "name": "collection",
             "type": "pubkey"
           },
@@ -1433,6 +1504,30 @@ export type Entry = {
           {
             "name": "merkleTree",
             "type": "pubkey"
+          },
+          {
+            "name": "registryTree",
+            "docs": [
+              "ENTRY controlled compressed ownership registry. This root is the gate's owner of record."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "registryRoot",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "registryDepth",
+            "type": "u8"
+          },
+          {
+            "name": "registrySeq",
+            "type": "u64"
           },
           {
             "name": "collection",
@@ -1655,6 +1750,60 @@ export type Entry = {
           },
           {
             "name": "fee",
+            "type": "u64"
+          },
+          {
+            "name": "registryRoot",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "registrySeq",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ticketResold",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "event",
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "askPrice",
+            "type": "u64"
+          },
+          {
+            "name": "registryRoot",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "registrySeq",
             "type": "u64"
           }
         ]

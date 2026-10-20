@@ -173,3 +173,63 @@ pub fn transfer_frozen_ticket<'info>(
         .invoke_signed(&[event_seeds])?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn proof(flags: u8) -> TicketLeafProof {
+        TicketLeafProof {
+            root: [1; 32],
+            data_hash: [2; 32],
+            creator_hash: [3; 32],
+            asset_data_hash: None,
+            flags: Some(flags),
+            nonce: 7,
+            index: 7,
+        }
+    }
+
+    fn valid_transfer_proofs() -> TicketTransferProofs {
+        TicketTransferProofs {
+            thaw: proof(TICKET_FROZEN_FLAGS),
+            transfer: proof(TICKET_THAWED_FLAGS),
+            refreeze: proof(TICKET_THAWED_FLAGS),
+        }
+    }
+
+    #[test]
+    fn transfer_requires_frozen_then_thawed_leaf_states() {
+        valid_transfer_proofs().validate().unwrap();
+
+        let mut invalid = valid_transfer_proofs();
+        invalid.thaw.flags = Some(TICKET_THAWED_FLAGS);
+        assert!(invalid.validate().is_err());
+
+        let mut invalid = valid_transfer_proofs();
+        invalid.refreeze.flags = Some(TICKET_FROZEN_FLAGS);
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn transfer_rejects_nontransferable_assets_and_mismatched_hashes() {
+        let mut nontransferable = valid_transfer_proofs();
+        nontransferable.transfer.flags = Some(NON_TRANSFERABLE);
+        assert!(nontransferable.validate().is_err());
+
+        let mut mismatched = valid_transfer_proofs();
+        mismatched.refreeze.data_hash = [9; 32];
+        assert!(mismatched.validate().is_err());
+    }
+
+    #[test]
+    fn transfer_requires_one_nonce_and_leaf_index_across_proofs() {
+        let mut mismatched_nonce = valid_transfer_proofs();
+        mismatched_nonce.transfer.nonce += 1;
+        assert!(mismatched_nonce.validate().is_err());
+
+        let mut mismatched_index = valid_transfer_proofs();
+        mismatched_index.refreeze.index += 1;
+        assert!(mismatched_index.validate().is_err());
+    }
+}

@@ -1,7 +1,11 @@
 use anchor_lang::{
     AccountDeserialize, AccountSerialize, Discriminator, InstructionData, ToAccountMetas,
 };
-use entry::{accounts, instruction, state::{CheckIns, Event}, ID as ENTRY_ID};
+use entry::{
+    accounts, instruction,
+    state::{CheckIns, Event},
+    ID as ENTRY_ID,
+};
 use solana_program_test::{processor, ProgramTest, ProgramTestContext};
 use solana_sdk::{
     account::Account,
@@ -13,7 +17,6 @@ use solana_sdk::{
 
 const EVENT_SEED: &[u8] = b"event";
 const CHECKIN_SEED: &[u8] = b"checkins";
-
 fn event_account(
     organizer: Pubkey,
     event_id: u64,
@@ -32,6 +35,10 @@ fn event_account(
         gatekeeper: Pubkey::new_unique(),
         payment_mint: Pubkey::new_unique(),
         merkle_tree: Pubkey::new_unique(),
+        registry_tree: Pubkey::new_unique(),
+        registry_root: [0; 32],
+        registry_depth: 3,
+        registry_seq: 0,
         collection: Pubkey::new_unique(),
         price: 1_000_000,
         supply,
@@ -101,7 +108,11 @@ async fn process_instruction(
 ) -> Result<(), solana_program_test::BanksClientError> {
     let blockhash = context.banks_client.get_latest_blockhash().await?;
     let mut signers: Vec<&dyn Signer> = vec![&context.payer];
-    signers.extend(additional_signers.iter().map(|signer| *signer as &dyn Signer));
+    signers.extend(
+        additional_signers
+            .iter()
+            .map(|signer| *signer as &dyn Signer),
+    );
     let transaction = Transaction::new_signed_with_payer(
         &[instruction],
         Some(&context.payer.pubkey()),
@@ -148,24 +159,57 @@ async fn organizer_can_pause_and_resume_event() {
 async fn gate_checkin_batch_sets_bits_once_and_rejects_unsold_nonce() {
     let organizer = Pubkey::new_unique();
     let gate = Keypair::new();
-    let (event_key, event_account) = event_account(organizer, 19, gate.pubkey(), 3, 2);
+    let (event_key, mut event_account) = event_account(organizer, 19, gate.pubkey(), 3, 2);
+    let owner = Pubkey::new_unique();
+    let proof_keys: Vec<_> = (1..=14u8)
+        .map(|byte| Pubkey::new_from_array([byte; 32]))
+        .collect();
+    let owner_leaf = entry::utils::registry::owner_leaf(event_key, 0, owner);
+    let mut registry_root = owner_leaf;
+    for (level, sibling) in proof_keys.iter().enumerate() {
+        registry_root = if ((0u64 >> level) & 1) == 0 {
+            solana_keccak_hasher::hashv(&[&registry_root, sibling.as_ref()]).to_bytes()
+        } else {
+            solana_keccak_hasher::hashv(&[sibling.as_ref(), &registry_root]).to_bytes()
+        };
+    }
+    let mut event_state = Event::try_deserialize(&mut event_account.data.as_slice()).unwrap();
+    event_state.registry_root = registry_root;
+    event_state.registry_depth = 14;
+    let mut event_data = Vec::new();
+    event_state.try_serialize(&mut event_data).unwrap();
+    event_account.data = event_data;
     let (checkins_key, checkins_account) = checkins_account(event_key, 3);
     let mut test = program_test();
     test.add_account(event_key, event_account);
     test.add_account(checkins_key, checkins_account);
     let mut context = test.start_with_context().await;
 
-    let make_ix = |nonces| Instruction {
-        program_id: ENTRY_ID,
-        accounts: accounts::CheckInBatch {
+    let proof_metas: Vec<_> = proof_keys
+        .iter()
+        .map(|key| solana_sdk::instruction::AccountMeta::new_readonly(*key, false))
+        .collect();
+    let make_ix = |tickets: Vec<entry::instructions::check_in::CheckInTicket>| {
+        let mut accounts = accounts::CheckInBatch {
             gate: gate.pubkey(),
             event: event_key,
             checkins: checkins_key,
         }
-        .to_account_metas(None),
-        data: instruction::CheckInBatch { nonces }.data(),
+        .to_account_metas(None);
+        for _ in 0..tickets.len() {
+            accounts.extend(proof_metas.clone());
+        }
+        Instruction {
+            program_id: ENTRY_ID,
+            accounts,
+            data: instruction::CheckInBatch { tickets }.data(),
+        }
     };
-    process_instruction(&mut context, make_ix(vec![0, 0, 1]), &[&gate])
+    let duplicate_scans = vec![
+        entry::instructions::check_in::CheckInTicket { nonce: 0, owner },
+        entry::instructions::check_in::CheckInTicket { nonce: 0, owner },
+    ];
+    process_instruction(&mut context, make_ix(duplicate_scans), &[&gate])
         .await
         .unwrap();
 
@@ -176,9 +220,27 @@ async fn gate_checkin_batch_sets_bits_once_and_rejects_unsold_nonce() {
         .unwrap()
         .unwrap();
     let bitmap = &account.data[CheckIns::HEADER_SIZE..];
-    assert_eq!(bitmap[0] & 0b11, 0b11);
+    assert_eq!(bitmap[0] & 0b01, 0b01);
 
-    assert!(process_instruction(&mut context, make_ix(vec![2]), &[&gate])
-        .await
-        .is_err());
+    assert!(process_instruction(
+        &mut context,
+        make_ix(vec![entry::instructions::check_in::CheckInTicket {
+            nonce: 0,
+            owner: Pubkey::new_unique(),
+        }]),
+        &[&gate]
+    )
+    .await
+    .is_err());
+
+    assert!(process_instruction(
+        &mut context,
+        make_ix(vec![entry::instructions::check_in::CheckInTicket {
+            nonce: 2,
+            owner
+        }]),
+        &[&gate]
+    )
+    .await
+    .is_err());
 }
